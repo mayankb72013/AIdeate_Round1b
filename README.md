@@ -38,6 +38,42 @@ Our system performs **persona-driven document intelligence** by:
 
 Our solution combines document structure analysis, semantic understanding, and persona-aware ranking to deliver precisely what each user needs. The system processes PDFs through multiple stages of analysis, from text extraction to intelligent content filtering, ensuring high-quality results tailored to individual requirements.
 
+## How to Build and Run
+
+The project is containerized using Docker and is designed to run according to the competition's execution specifications.
+
+### Prerequisites
+- Docker must be installed and running.
+
+### Build the Docker Image
+
+Navigate to the project's root directory in your terminal and run the following command to build the image:
+
+```bash
+docker build --platform linux/amd64 -t mysolutionname:somerandomidentifier . 
+```
+
+### Run the Solution
+
+To process the PDFs, place them inside a folder named input in the current directory, and create an empty output folder where the results will be saved. Then run the following command:
+
+```bash
+docker run --rm \
+  -v $(pwd)/input:/app/input \
+  -v $(pwd)/output:/app/output \
+  --network none \
+  mysolutionname:somerandomidentifier
+```
+
+- The container will automatically:
+- Find all .pdf files in the input directory
+- Process each one
+- Generate a corresponding .json file in the output directory
+
+---
+
+Let me know if you want the README written to a file for download, or if you'd like to include a sample output format or API spec as well.
+
 ### Team AIdeate
 
 Built with passion for intelligent document processing and user-centric AI solutions.
