@@ -45,7 +45,7 @@ The project is containerized using Docker and is designed to run according to th
 ### Prerequisites
 - Docker must be installed and running.
 
-### 📁 Prepare the Input Directory
+###$ 📁 Prepare the Input Directory
 
 The script requires a specific folder structure for its input.
 
@@ -75,7 +75,7 @@ Our script **intelligently discovers and processes** all PDF files found in the 
   "persona": "PhD Researcher in Computational Biology",
   "job_to_be_done": "Prepare a comprehensive literature review focusing on methodologies, datasets, and performance benchmarks"
 }
-
+```
 ### Build the Docker Image
 
 Navigate to the project's root directory in your terminal and run the following command to build the image:
