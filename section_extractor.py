@@ -2,11 +2,9 @@ import json
 import logging
 import numpy as np
 from typing import List, Dict, Tuple, Any, Optional
-from sentence_transformers import SentenceTransformer, CrossEncoder
-from sklearn.metrics.pairwise import cosine_similarity
 import re
 from collections import defaultdict
-import torch
+import os
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -20,18 +18,26 @@ class SectionExtractor:
         Args:
             model_name: Cross-encoder model for relevance scoring
         """
+        self.cross_encoder = None
+        self.sentence_model = None
+        
         try:
-            # Initialize cross-encoder for relevance scoring
-            self.cross_encoder = CrossEncoder(model_name)
-            logger.info(f"Loaded cross-encoder model: {model_name}")
-            
-            # Fallback sentence transformer for embeddings if needed
-            self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
-            logger.info("Loaded sentence transformer model")
-            
+            # Try to load cross-encoder model if available
+            if os.path.exists(model_name):
+                from sentence_transformers import CrossEncoder
+                self.cross_encoder = CrossEncoder(model_name)
+                logger.info(f"Loaded cross-encoder model: {model_name}")
+            else:
+                logger.warning(f"Cross-encoder model not found at {model_name}, using fallback scoring")
+                
         except Exception as e:
-            logger.error(f"Error loading models: {e}")
-            raise
+            logger.warning(f"Error loading cross-encoder model: {e}, using fallback scoring")
+            self.cross_encoder = None
+        
+        # REMOVED: This line was causing network calls
+        # self.sentence_model = SentenceTransformer('all-MiniLM-L6-v2')
+        
+        logger.info("SectionExtractor initialized successfully")
     
     def extract_relevant_sections(self, documents_data: Dict, persona: str, job_to_be_done: str) -> Dict[str, Any]:
         """
@@ -57,7 +63,7 @@ class SectionExtractor:
             # Score sections based on relevance
             scored_sections = self._score_sections(all_sections, relevance_queries, persona, job_to_be_done)
             
-            # Rank and filter top sections - LOWERED THRESHOLD
+            # Rank and filter top sections
             top_sections = self._rank_and_filter_sections(scored_sections)
             
             # Perform sub-section analysis
@@ -152,7 +158,7 @@ class SectionExtractor:
                 
                 section_content = section_content.strip()
                 
-                if section_content and len(section_content) > 30:  # LOWERED from 50 to 30
+                if section_content and len(section_content) > 30:
                     section_info = {
                         "document": doc_key,
                         "section_title": section["heading"]["text"],
@@ -169,7 +175,8 @@ class SectionExtractor:
     
     def _score_sections(self, sections: List[Dict], queries: List[str], persona: str, job_to_be_done: str) -> List[Dict]:
         """
-        Score sections based on relevance to persona and job using cross-encoder.
+        Score sections based on relevance to persona and job.
+        Uses cross-encoder if available, otherwise falls back to keyword matching.
         """
         scored_sections = []
         
@@ -179,52 +186,22 @@ class SectionExtractor:
         for section in sections:
             try:
                 # Prepare text for scoring (title + content preview)
-                section_text = f"{section['section_title']}. {section['content'][:300]}"  # REDUCED from 500 to 300
+                section_text = f"{section['section_title']}. {section['content'][:300]}"
                 
-                # Score against primary query using cross-encoder
-                try:
-                    primary_score_raw = self.cross_encoder.predict([primary_query, section_text])
-                    # FIXED: Handle different return types
-                    if isinstance(primary_score_raw, (list, np.ndarray)):
-                        primary_score = float(primary_score_raw[0])
-                    else:
-                        primary_score = float(primary_score_raw)
-                    
-                    # Normalize score to 0-1 range if it's outside
-                    if primary_score < 0:
-                        primary_score = 1.0 / (1.0 + np.exp(-primary_score))  # Sigmoid for negative scores
-                    elif primary_score > 1:
-                        primary_score = min(1.0, primary_score / 10.0)  # Scale down if too large
-                        
-                except Exception as e:
-                    logger.warning(f"Cross-encoder prediction failed: {e}")
-                    primary_score = 0.1  # Fallback score
-                
-                # Score against individual queries (REDUCED for performance)
-                query_scores = []
-                for query in queries[:3]:  # LIMIT to first 3 queries for speed
-                    try:
-                        score_raw = self.cross_encoder.predict([query, section_text])
-                        if isinstance(score_raw, (list, np.ndarray)):
-                            score = float(score_raw[0])
-                        else:
-                            score = float(score_raw)
-                        
-                        # Apply same normalization
-                        if score < 0:
-                            score = 1.0 / (1.0 + np.exp(-score))
-                        elif score > 1:
-                            score = min(1.0, score / 10.0)
-                            
-                        query_scores.append(score)
-                    except:
-                        query_scores.append(0.0)
+                if self.cross_encoder:
+                    # Use cross-encoder if available
+                    primary_score = self._score_with_cross_encoder(primary_query, section_text)
+                    query_scores = [self._score_with_cross_encoder(query, section_text) for query in queries[:3]]
+                else:
+                    # Use fallback keyword scoring
+                    primary_score = self._score_with_keywords(primary_query, section_text)
+                    query_scores = [self._score_with_keywords(query, section_text) for query in queries[:3]]
                 
                 # Calculate combined relevance score
                 avg_query_score = np.mean(query_scores) if query_scores else 0.0
                 combined_score = (primary_score * 0.6) + (avg_query_score * 0.4)
                 
-                # Add section-level importance based on heading level and keywords
+                # Add section-level importance
                 section_importance = self._calculate_section_importance(section, persona, job_to_be_done)
                 
                 # Final score
@@ -244,10 +221,44 @@ class SectionExtractor:
                 logger.warning(f"Error scoring section '{section['section_title']}': {e}")
                 # Add with minimal score to avoid losing sections
                 section_copy = section.copy()
-                section_copy["relevance_score"] = 0.2  # INCREASED from 0.1 to 0.2
+                section_copy["relevance_score"] = 0.2
                 scored_sections.append(section_copy)
         
         return scored_sections
+    
+    def _score_with_cross_encoder(self, query: str, text: str) -> float:
+        """Score using cross-encoder model."""
+        try:
+            score_raw = self.cross_encoder.predict([query, text])
+            if isinstance(score_raw, (list, np.ndarray)):
+                score = float(score_raw[0])
+            else:
+                score = float(score_raw)
+            
+            # Normalize score to 0-1 range
+            if score < 0:
+                score = 1.0 / (1.0 + np.exp(-score))  # Sigmoid for negative scores
+            elif score > 1:
+                score = min(1.0, score / 10.0)  # Scale down if too large
+                
+            return score
+        except Exception as e:
+            logger.warning(f"Cross-encoder prediction failed: {e}")
+            return self._score_with_keywords(query, text)
+    
+    def _score_with_keywords(self, query: str, text: str) -> float:
+        """Fallback keyword-based scoring."""
+        query_words = set(query.lower().split())
+        text_words = set(text.lower().split())
+        
+        # Calculate overlap
+        overlap = len(query_words.intersection(text_words))
+        max_possible = len(query_words)
+        
+        if max_possible == 0:
+            return 0.0
+        
+        return overlap / max_possible
     
     def _calculate_section_importance(self, section: Dict, persona: str, job_to_be_done: str) -> float:
         """
@@ -264,7 +275,6 @@ class SectionExtractor:
                 importance += 0.5
             elif any(term in title_lower for term in ["abstract", "summary"]):
                 importance += 0.6
-            # ADDED: Dataset and benchmark specific terms
             elif any(term in title_lower for term in ["dataset", "benchmark", "performance", "evaluation", "experiment"]):
                 importance += 0.8
         
@@ -282,11 +292,11 @@ class SectionExtractor:
             elif any(term in title_lower for term in ["introduction", "basic", "overview", "concept"]):
                 importance += 0.5
         
-        # Job-specific keywords - MORE GENEROUS SCORING
+        # Job-specific keywords
         job_keywords = self._extract_keywords(job_to_be_done)
         for keyword in job_keywords:
             if keyword.lower() in title_lower:
-                importance += 0.4  # INCREASED from 0.3
+                importance += 0.4
         
         # Section level importance (H1 > H2 > H3)
         if section["level"] == "H1":
@@ -294,7 +304,7 @@ class SectionExtractor:
         elif section["level"] == "H2":
             importance += 0.1
         
-        # Content length bonus (substantial sections are usually more important)
+        # Content length bonus
         if section["word_count"] > 500:
             importance += 0.1
         elif section["word_count"] > 200:
@@ -309,8 +319,8 @@ class SectionExtractor:
         # Sort by relevance score (descending)
         ranked_sections = sorted(scored_sections, key=lambda x: x["relevance_score"], reverse=True)
         
-        # MUCH LOWER threshold and adaptive filtering
-        min_score = 0.15  # LOWERED from 0.3 to 0.15
+        # Lower threshold for better coverage
+        min_score = 0.15
         filtered_sections = [s for s in ranked_sections if s["relevance_score"] >= min_score]
         
         # If still no sections, take top 10 regardless of score
@@ -370,18 +380,17 @@ class SectionExtractor:
     def _extract_key_content(self, content: str, persona: str, job_to_be_done: str, max_sentences: int = 3) -> str:
         """
         Extract the most relevant sentences from section content.
-        OPTIMIZED for performance.
         """
         try:
             # Split content into sentences
             sentences = re.split(r'[.!?]+', content)
             sentences = [s.strip() for s in sentences if len(s.strip()) > 20]
             
-            # PERFORMANCE OPTIMIZATION: If content is reasonable length, return as-is
+            # If content is reasonable length, return as-is
             if len(sentences) <= max_sentences or len(content) <= 800:
                 return content[:800] + "..." if len(content) > 800 else content
             
-            # SIMPLIFIED scoring: Use keyword matching instead of cross-encoder for speed
+            # Use keyword matching for sentence selection
             query_keywords = set(self._extract_keywords(f"{persona} {job_to_be_done}"))
             
             sentence_scores = []

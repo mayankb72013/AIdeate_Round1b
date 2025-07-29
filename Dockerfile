@@ -1,8 +1,8 @@
-FROM --platform=linux/amd64 python:3.10
+FROM --platform=linux/amd64 python:3.9
 
 WORKDIR /app
 
-# Install system dependencies for PyMuPDF and libcrypt fix
+# Install system dependencies for PyMuPDF and other requirements
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -10,6 +10,13 @@ RUN apt-get update && apt-get install -y \
     libcrypt1 \
     && ln -s /lib/x86_64-linux-gnu/libcrypt.so.1 /lib/x86_64-linux-gnu/libcrypt.so.2 \
     && rm -rf /var/lib/apt/lists/*
+
+# Set offline environment variables to prevent network calls
+ENV HF_DATASETS_OFFLINE=1
+ENV TRANSFORMERS_OFFLINE=1
+ENV HF_HUB_OFFLINE=1
+ENV TOKENIZERS_PARALLELISM=false
+ENV PYTHONUNBUFFERED=1
 
 # Copy requirements and install Python dependencies
 COPY requirements.txt .
@@ -21,11 +28,11 @@ COPY section_extractor.py .
 COPY persona_analyzer.py .
 COPY main.py .
 
-# Copy models directory
+# Copy models directory (make sure this exists in your project)
 COPY models/ ./models/
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1
+# Create input and output directories
+RUN mkdir -p /app/input /app/output
 
 # Run the main script
 CMD ["python", "main.py"]
