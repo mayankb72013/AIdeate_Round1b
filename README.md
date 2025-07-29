@@ -45,6 +45,37 @@ The project is containerized using Docker and is designed to run according to th
 ### Prerequisites
 - Docker must be installed and running.
 
+### 📁 Prepare the Input Directory
+
+The script requires a specific folder structure for its input.
+
+## Steps
+
+1. Navigate into the `input/` folder.
+2. Inside `input/`, create a folder named `documents`.
+3. Place all the **PDF files** you want to analyze inside the `input/documents/` folder.
+4. Inside the `input/` folder, create a file named `config.json`.
+
+---
+
+## 🛠 The `config.json` File
+
+Our system uses a streamlined `config.json` that only requires the essential inputs: the **persona** and the **job-to-be-done**.
+
+### ✅ Advantage:
+Unlike other formats, you do **not** need to manually list every single document filename.  
+Our script **intelligently discovers and processes** all PDF files found in the `input/documents/` directory, making it more robust and easier to use.
+
+---
+
+### Example `config.json` structure:
+
+```json
+{
+  "persona": "PhD Researcher in Computational Biology",
+  "job_to_be_done": "Prepare a comprehensive literature review focusing on methodologies, datasets, and performance benchmarks"
+}
+
 ### Build the Docker Image
 
 Navigate to the project's root directory in your terminal and run the following command to build the image:
